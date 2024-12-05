@@ -67,7 +67,7 @@ void display_file_info(const char *path, const char *name, struct stat *file_sta
         // Читаем, на что указывает символическая ссылка
         link_len = readlink(path, link_target, sizeof(link_target) - 1);
         if (link_len != -1) {
-            link_target[link_len] = '\0'; /
+            link_target[link_len] = '\0';
             printf(" %s%s%s -> %s\n", COLOR_CYAN, name, COLOR_RESET, link_target);
         } else {
             printf(" %s%s%s\n", COLOR_CYAN, name, COLOR_RESET);
