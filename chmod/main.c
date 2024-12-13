@@ -2,11 +2,13 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <ctype.h>  // Для функции isdigit()
 
 mode_t parse_numeric_mode(const char *mode_str) {
     mode_t mode = 0;
 
-    if (strlen(mode_str) != 3) {
+    printf("%d %c", isdigit(mode_str[0]), mode_str[0]);
+    if (strlen(mode_str) != 3 || (!isdigit(mode_str[0]) || !isdigit(mode_str[1]) || !isdigit(mode_str[2]))) {
         fprintf(stderr, "Invalid numeric mode format\n");
         exit(EXIT_FAILURE);
     }
@@ -130,6 +132,7 @@ int main(int argc, char *argv[]) {
 
     mode_t mode = file_stat.st_mode;
 
+
     if (mode_str[0] >= '0' && mode_str[0] <= '9') {
         mode = parse_numeric_mode(mode_str);
     } else {
@@ -141,6 +144,5 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    printf("Permissions for file %s changed successfully.\n", file_name);
     return EXIT_SUCCESS;
 }

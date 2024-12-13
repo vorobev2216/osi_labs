@@ -4,10 +4,10 @@ FILE = test1.txt test2.txt
 PATTERNS = paattern.reg
 
 
-all: s21_grep tests
+all: s21_grep
 
 s21_grep: clean
-	gcc $(FLAGS) s21_grep.c -o s21_grep
+	gcc s21_grep.c -o s21_grep
 
 tests:
 	-diff <(./s21_grep ok $(FILE)) <(grep ok $(FILE))
