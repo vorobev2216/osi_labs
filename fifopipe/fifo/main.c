@@ -1,21 +1,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <time.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <sys/wait.h>
 
-#define FIFO_BUFFER "./fifo/my_fifo"
+#define FIFO_NAME "my_fifo"
 
 int main() {
     pid_t pid;
-    char buffer[128];
+    char buffer[256];
     time_t parent_time, child_time;
 
-    if (mkfifo(FIFO_BUFFER, 0666) == -1) {
+    if (mkfifo(FIFO_NAME, 0666) == -1) {
         perror("mkfifo");
         exit(EXIT_FAILURE);
     }
@@ -26,26 +24,33 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    if (pid > 0) { // Родительский процесс
-        int fd;
-        parent_time = time(NULL);
-        snprintf(buffer, sizeof(buffer), "Parent PID: %d, Time: %s", getpid(), ctime(&parent_time));
-        fd = open(FIFO_BUFFER, O_WRONLY);
-        write(fd, buffer, strlen(buffer) + 1);
-        close(fd);
-        wait(NULL);
-    }
-    else { // Дочерний процесс
-        sleep(5);
-        int fd;
-        fd = open(FIFO_BUFFER, O_RDONLY);
-        read(fd, buffer, sizeof(buffer));
-        close(fd);
+    if (pid == 0) { // Дочерний процесс
+        int fd = open(FIFO_NAME, O_RDONLY);
+        if (fd == -1) {
+            perror("open");
+            exit(EXIT_FAILURE);
+        }
         child_time = time(NULL);
-        printf("Child Time: %s", ctime(&child_time));
-        printf("Received: %s\n", buffer);
-        unlink(FIFO_BUFFER);
+        printf("Child PID: %d, Time: %s", getpid(), ctime(&child_time));
+        read(fd, buffer, sizeof(buffer));
+        printf("%s", buffer);
+        close(fd);
+    } else { // Родительский процесс
+        int fd = open(FIFO_NAME, O_WRONLY);
+        if (fd == -1) {
+            perror("open");
+            exit(EXIT_FAILURE);
+        }
+        sleep(5); 
+        parent_time = time(NULL);
+        char message[256];
+        snprintf(message, sizeof(message), "Parent PID: %d, Time: %s", getpid(), ctime(&parent_time));
+        write(fd, message, strlen(message) + 1);
+        close(fd);
     }
 
+    if (pid > 0) { 
+        unlink(FIFO_NAME);
+    }
     return 0;
 }

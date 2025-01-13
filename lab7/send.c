@@ -1,99 +1,102 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
-#include <sys/mman.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <semaphore.h>
-#include <string.h>
-#include <time.h>
-#include <signal.h>
+#include <sys/file.h>
 #include <errno.h>
 
-// Имя сегмента разделяемой памяти
-const char *SHM_NAME = "/shm_time";
-const char *SEMAPHORE_NAME = "/shm_sem"; // Имя семафора
+#define SHM_SIZE 256
+#define LOCKFILE "./sender.lock"
+#define SHMFILE "./shmfile"
 
-// Структура данных для передачи
-typedef struct {
-    time_t timestamp;
-    pid_t pid;
-    char message[128];
-} shared_data_t;
-
-sem_t *sem;
-
-void cleanup(void) {
-    shm_unlink(SHM_NAME);
-    sem_close(sem);
-    sem_unlink(SEMAPHORE_NAME);
+void get_current_time(char *buffer, size_t size) {
+    time_t now = time(NULL);
+    struct tm *time_info = localtime(&now);
+    strftime(buffer, size, "%Y-%m-%d %H:%M:%S", time_info);
 }
 
-void handle_signal(int sig) {
-    cleanup();
-    exit(0);
+void handle_existing_instance() {
+    printf("Передающий процесс уже запущен. Завершение.\n");
+    exit(EXIT_FAILURE);
 }
 
 int main() {
-    // Обработка сигналов
-    signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
+    int lock_fd = open(LOCKFILE, O_CREAT | O_RDWR, 0666);
+    if (lock_fd == -1) {
+        perror("Ошибка открытия lock-файла");
+        exit(EXIT_FAILURE);
+    }
 
-    // Инициализация семафора для проверки уникального запуска
-    sem = sem_open(SEMAPHORE_NAME, O_CREAT | O_EXCL, 0644, 1);
-    if (sem == SEM_FAILED) {
-        if (errno == EEXIST) {
-            fprintf(stderr, "Процесс уже запущен!\n");
-            return EXIT_FAILURE;
+    if (flock(lock_fd, LOCK_EX | LOCK_NB) == -1) {
+        if (errno == EWOULDBLOCK) {
+            handle_existing_instance();
         } else {
-            perror("Ошибка создания семафора");
-            return EXIT_FAILURE;
+            perror("Ошибка установки блокировки");
+            close(lock_fd);
+            exit(EXIT_FAILURE);
         }
     }
 
-    // Создаем сегмент разделяемой памяти
-    int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0644);
-    if (shm_fd == -1) {
-        perror("Ошибка создания разделяемой памяти");
-        sem_close(sem);
-        sem_unlink(SEMAPHORE_NAME);
-        return EXIT_FAILURE;
+    FILE *file = fopen(SHMFILE, "a");
+    if (!file) {
+        perror("Ошибка создания shmfile");
+        close(lock_fd);
+        unlink(LOCKFILE);
+        exit(EXIT_FAILURE);
+    }
+    fclose(file);
+    chmod(SHMFILE, 0666);
+
+    key_t key = ftok(SHMFILE, 65);
+    if (key == -1) {
+        perror("Ошибка ftok");
+        close(lock_fd);
+        unlink(LOCKFILE);
+        exit(EXIT_FAILURE);
     }
 
-    // Устанавливаем размер сегмента разделяемой памяти
-    if (ftruncate(shm_fd, sizeof(shared_data_t)) == -1) {
-        perror("Ошибка установки размера разделяемой памяти");
-        shm_unlink(SHM_NAME);
-        sem_close(sem);
-        sem_unlink(SEMAPHORE_NAME);
-        return EXIT_FAILURE;
+    int shmid = shmget(key, SHM_SIZE, 0666 | IPC_CREAT);
+    if (shmid == -1) {
+        perror("Ошибка shmget");
+        close(lock_fd);
+        unlink(LOCKFILE);
+        exit(EXIT_FAILURE);
     }
 
-    // Отображаем сегмент разделяемой памяти в адресное пространство процесса
-    shared_data_t *data = mmap(NULL, sizeof(shared_data_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (data == MAP_FAILED) {
-        perror("Ошибка отображения разделяемой памяти");
-        shm_unlink(SHM_NAME);
-        sem_close(sem);
-        sem_unlink(SEMAPHORE_NAME);
-        return EXIT_FAILURE;
+    char *shared_memory = (char *)shmat(shmid, NULL, 0);
+    if (shared_memory == (char *)(-1)) {
+        perror("Ошибка shmat");
+        close(lock_fd);
+        unlink(LOCKFILE);
+        exit(EXIT_FAILURE);
     }
 
-    close(shm_fd);
+    printf("Передающий процесс запущен. PID: %d\n", getpid());
 
     while (1) {
-        data->timestamp = time(NULL);
-        data->pid = getpid();
+        char time_buffer[64];
+        get_current_time(time_buffer, sizeof(time_buffer));
 
-        char formatted_time[80];
-        strftime(formatted_time, sizeof(formatted_time), "%Y-%m-%d %H:%M:%S", localtime(&data->timestamp));
-        snprintf(data->message, sizeof(data->message), "Time: %s, PID: %d", formatted_time, data->pid);
+        snprintf(shared_memory, SHM_SIZE, "PID: %d, Время: %s", getpid(), time_buffer);
 
-        sleep(5);
+        sleep(2);
     }
 
-    munmap(data, sizeof(shared_data_t));
-    cleanup(); // Освобождаем ресурсы
+    if (shmdt(shared_memory) == -1) {
+        perror("Ошибка отключения от разделяемой памяти");
+    }
+
+    if (shmctl(shmid, IPC_RMID, NULL) == -1) {
+        perror("Ошибка удаления сегмента разделяемой памяти");
+    }
+
+    close(lock_fd);
+    unlink(LOCKFILE);
 
     return 0;
 }

@@ -1,15 +1,15 @@
-.PHONY: all clean run mypipe myfifo
+.PHONY: all clean
 
-all: mypipe myfifo
+CC = gcc
+CFLAGS = -Wall -Wextra
 
-mypipe: pipe/main.c
-        gcc pipe/main.c -o pipe/mypipe
+all: fifo pipe
 
-myfifo: fifo/main.c
-        gcc fifo/main.c -o fifo/myfifo
+mycat: mycat.c
+	$(CC) $(CFLAGS) fifo.c -o fifo
+
+mygrep: pipe.c
+	$(CC) $(CFLAGS) pipe.c -o pipe
 
 clean:
-        rm -f pipe/mypipe fifo/myfifo
-
-run: mypipe myfifo
-        ./pipe/mypipe & ./fifo/myfifo
+        rm -rf *.o fifo pipe
